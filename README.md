@@ -1,4 +1,4 @@
-# HabotConnect Parent-LSA App — Mobile-First QA Architecture
+# HabotConnect 
 
 > **Candidate:** Hiruthickroshan E
 > **Email:** hiruthick1947@gmail.com
@@ -231,4 +231,4 @@ npm run format
 
 ## 📝 License
 
-This project is submitted as part of the HabotConnect hiring process.
+This project is submitted as part of the HabotConnect.
