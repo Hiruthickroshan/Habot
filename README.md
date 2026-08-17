@@ -222,7 +222,7 @@ npm run format
 
 ## 📎 Submission Links
 
-1. **Presentation:** [Google Slides / PDF Link — Add Here]
+1. **Presentation:** 
 2. **Repository:** [https://github.com/Hiruthickroshan/Habot](https://github.com/Hiruthickroshan/Habot)
 
 ---
