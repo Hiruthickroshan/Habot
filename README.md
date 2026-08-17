@@ -1,8 +1,6 @@
 # HabotConnect 
 
 > **Candidate:** Hiruthickroshan E
-> **Email:** hiruthick1947@gmail.com
-> **Phone:** +91 9159257419
 
 ---
 
