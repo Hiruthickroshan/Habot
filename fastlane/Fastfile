@@ -1,0 +1,186 @@
+# ─────────────────────────────────────────────────────────────────────
+# Fastfile — HabotConnect Parent-LSA App
+# ─────────────────────────────────────────────────────────────────────
+#
+# Fastlane configuration for automated builds and deployment.
+# Supports both iOS (TestFlight) and Android (Play Store Internal).
+#
+# Lanes:
+#   - beta:    Build and deploy to TestFlight / Play Store internal
+#   - release: Build and deploy to App Store / Play Store production
+#   - test:    Run all tests
+#
+# ─────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════
+# Global Setup
+# ═══════════════════════════════════════════════════════════════════
+
+default_platform(:ios)
+
+before_all do
+  ensure_git_status_clean
+  git_pull
+end
+
+# ═══════════════════════════════════════════════════════════════════
+# iOS Platform
+# ═══════════════════════════════════════════════════════════════════
+
+platform :ios do
+  desc "Run iOS tests"
+  lane :test do
+    scan(
+      workspace: "ios/HabotConnect.xcworkspace",
+      scheme: "HabotConnect",
+      devices: ["iPhone 15 Pro"],
+      code_coverage: true,
+      output_directory: "./test-results/ios",
+      output_types: "junit"
+    )
+  end
+
+  desc "Build and deploy to TestFlight (beta)"
+  lane :beta do
+    # ── Increment build number ────────────────────────────────────
+    increment_build_number(
+      xcodeproj: "ios/HabotConnect.xcodeproj",
+      build_number: ENV["GITHUB_RUN_NUMBER"] || (latest_testflight_build_number + 1)
+    )
+
+    # ── Code signing via Match ────────────────────────────────────
+    match(
+      type: "appstore",
+      readonly: true,
+      app_identifier: "com.habotconnect.app"
+    )
+
+    # ── Build the app ─────────────────────────────────────────────
+    build_app(
+      workspace: "ios/HabotConnect.xcworkspace",
+      scheme: "HabotConnect",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "./build/ios",
+      output_name: "HabotConnect.ipa",
+      include_bitcode: false,
+      clean: true
+    )
+
+    # ── Upload to TestFlight ──────────────────────────────────────
+    upload_to_testflight(
+      skip_submission: false,
+      skip_waiting_for_build_processing: true,
+      distribute_external: false,
+      changelog: "Build #{lane_context[SharedValues::BUILD_NUMBER]}\n\n" \
+                 "Changes:\n" \
+                 "#{changelog_from_git_commits(commits_count: 10)}"
+    )
+
+    # ── Notify ────────────────────────────────────────────────────
+    UI.success("✅ iOS beta deployed to TestFlight!")
+  end
+
+  desc "Build and deploy to App Store (production)"
+  lane :release do
+    # Ensure we're on main branch
+    ensure_git_branch(branch: "main")
+
+    # Run tests first
+    test
+
+    # Build and upload
+    beta
+
+    # Submit for review
+    upload_to_app_store(
+      skip_binary_upload: true,
+      submit_for_review: true,
+      automatic_release: false,
+      precheck_include_in_app_purchases: false,
+      force: true
+    )
+
+    UI.success("✅ iOS release submitted for App Store review!")
+  end
+end
+
+# ═══════════════════════════════════════════════════════════════════
+# Android Platform
+# ═══════════════════════════════════════════════════════════════════
+
+platform :android do
+  desc "Run Android tests"
+  lane :test do
+    gradle(
+      project_dir: "android",
+      task: "test",
+      build_type: "Debug"
+    )
+  end
+
+  desc "Build and deploy to Play Store Internal Track (beta)"
+  lane :beta do
+    # ── Increment version code ────────────────────────────────────
+    android_set_version_code(
+      gradle_file: "android/app/build.gradle",
+      version_code: ENV["GITHUB_RUN_NUMBER"]&.to_i || (google_play_track_version_codes(track: "internal").first + 1)
+    )
+
+    # ── Build AAB (Android App Bundle) ────────────────────────────
+    gradle(
+      project_dir: "android",
+      task: "bundle",
+      build_type: "Release",
+      properties: {
+        "android.injected.signing.store.file" => ENV["ANDROID_KEYSTORE_PATH"] || "release.keystore",
+        "android.injected.signing.store.password" => ENV["ANDROID_KEYSTORE_PASSWORD"],
+        "android.injected.signing.key.alias" => ENV["ANDROID_KEY_ALIAS"],
+        "android.injected.signing.key.password" => ENV["ANDROID_KEY_PASSWORD"]
+      }
+    )
+
+    # ── Upload to Play Store Internal Track ───────────────────────
+    upload_to_play_store(
+      track: "internal",
+      aab: "android/app/build/outputs/bundle/release/app-release.aab",
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+
+    UI.success("✅ Android beta deployed to Play Store Internal Track!")
+  end
+
+  desc "Promote internal to production"
+  lane :release do
+    # Ensure we're on main branch
+    ensure_git_branch(branch: "main")
+
+    # Run tests first
+    test
+
+    # Promote from internal to production
+    upload_to_play_store(
+      track: "internal",
+      track_promote_to: "production",
+      skip_upload_aab: true,
+      skip_upload_metadata: false
+    )
+
+    UI.success("✅ Android promoted to production!")
+  end
+end
+
+# ═══════════════════════════════════════════════════════════════════
+# Post-lane Hooks
+# ═══════════════════════════════════════════════════════════════════
+
+after_all do |lane|
+  # Clean up build artifacts
+  clean_build_artifacts
+end
+
+error do |lane, exception|
+  UI.error("❌ Fastlane error in #{lane}: #{exception.message}")
+end

@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🚀 Running pre-push checks..."
+
+# ── Step 1: Run unit tests with coverage ─────────────────────────────
+echo "🧪 Running unit tests..."
+npx jest --testPathPattern='__tests__/unit' --coverage --coverageThreshold='{"global":{"branches":80,"functions":80,"lines":80,"statements":80}}' || {
+  echo "❌ Unit tests failed or coverage threshold not met."
+  echo "   Minimum coverage required: 80% (branches, functions, lines, statements)"
+  exit 1
+}
+
+# ── Step 2: Run integration tests ────────────────────────────────────
+echo "🔗 Running integration tests..."
+npx jest --testPathPattern='__tests__/integration' || {
+  echo "❌ Integration tests failed."
+  exit 1
+}
+
+echo "✅ All pre-push checks passed! Safe to push."

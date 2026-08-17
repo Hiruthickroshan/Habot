@@ -1,0 +1,29 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🔍 Running pre-commit checks..."
+
+# ── Step 1: ESLint (includes accessibility rules) ────────────────────
+echo "📋 Linting staged files (ESLint + a11y rules)..."
+npx eslint --max-warnings=0 $(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$') || {
+  echo "❌ ESLint failed. Please fix linting errors before committing."
+  echo "   Run 'npm run lint:fix' to auto-fix issues."
+  exit 1
+}
+
+# ── Step 2: Prettier format check ────────────────────────────────────
+echo "🎨 Checking code formatting (Prettier)..."
+npx prettier --check $(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|json)$') || {
+  echo "❌ Prettier check failed. Please format your code."
+  echo "   Run 'npm run format' to auto-format."
+  exit 1
+}
+
+# ── Step 3: TypeScript type checking ─────────────────────────────────
+echo "🔧 Running TypeScript type check..."
+npx tsc --noEmit || {
+  echo "❌ TypeScript type check failed. Please fix type errors."
+  exit 1
+}
+
+echo "✅ All pre-commit checks passed!"

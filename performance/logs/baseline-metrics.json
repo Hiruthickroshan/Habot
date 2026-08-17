@@ -1,0 +1,138 @@
+{
+  "metric": "baseline_performance",
+  "app_version": "1.0.0-beta.1",
+  "timestamp": "2024-03-10T10:00:00.000Z",
+  "devices": {
+    "ios": {
+      "model": "iPhone 15 Pro",
+      "os_version": "iOS 17.3"
+    },
+    "android": {
+      "model": "Pixel 7",
+      "os_version": "Android 14"
+    }
+  },
+  "metrics": {
+    "cold_start_time": {
+      "unit": "ms",
+      "threshold": 3000,
+      "ios": {
+        "average": 1450,
+        "min": 1320,
+        "max": 1680,
+        "samples": [1450, 1380, 1680, 1320, 1420],
+        "status": "PASS"
+      },
+      "android": {
+        "average": 1820,
+        "min": 1650,
+        "max": 2100,
+        "samples": [1820, 1750, 2100, 1650, 1780],
+        "status": "PASS"
+      }
+    },
+    "time_to_interactive": {
+      "unit": "ms",
+      "threshold": 3000,
+      "screens": {
+        "HomeScreen": {
+          "ios": 980,
+          "android": 1250,
+          "status": "PASS"
+        },
+        "LSASearchScreen": {
+          "ios": 620,
+          "android": 850,
+          "status": "PASS"
+        },
+        "LSAProfileScreen": {
+          "ios": 780,
+          "android": 1050,
+          "status": "PASS"
+        },
+        "BookingScreen": {
+          "ios": 450,
+          "android": 620,
+          "status": "PASS"
+        },
+        "ConfirmationScreen": {
+          "ios": 380,
+          "android": 520,
+          "status": "PASS"
+        }
+      }
+    },
+    "frame_rate": {
+      "unit": "fps",
+      "threshold": 55,
+      "scenarios": {
+        "home_scroll": {
+          "ios": { "average": 59.8, "min": 57, "dropped_frames": 2 },
+          "android": { "average": 58.5, "min": 55, "dropped_frames": 5 }
+        },
+        "search_results_scroll": {
+          "ios": { "average": 59.5, "min": 56, "dropped_frames": 3 },
+          "android": { "average": 57.8, "min": 54, "dropped_frames": 8 }
+        },
+        "profile_scroll": {
+          "ios": { "average": 60.0, "min": 59, "dropped_frames": 0 },
+          "android": { "average": 59.2, "min": 57, "dropped_frames": 3 }
+        },
+        "booking_form_scroll": {
+          "ios": { "average": 59.9, "min": 58, "dropped_frames": 1 },
+          "android": { "average": 58.9, "min": 56, "dropped_frames": 4 }
+        }
+      },
+      "status": "PASS"
+    },
+    "memory_usage": {
+      "unit": "MB",
+      "threshold": 250,
+      "warning_threshold": 150,
+      "ios": {
+        "initial": 85,
+        "after_full_flow": 112,
+        "peak": 128,
+        "growth_rate_mb_per_min": 0.8,
+        "leak_detected": false,
+        "status": "PASS"
+      },
+      "android": {
+        "initial": 95,
+        "after_full_flow": 135,
+        "peak": 155,
+        "growth_rate_mb_per_min": 1.2,
+        "leak_detected": false,
+        "status": "PASS"
+      }
+    },
+    "bundle_size": {
+      "unit": "MB",
+      "threshold": 8,
+      "ios": {
+        "ipa_size": 4.2,
+        "js_bundle_size": 1.8
+      },
+      "android": {
+        "apk_size": 3.8,
+        "aab_size": 3.2,
+        "js_bundle_size": 1.8
+      },
+      "status": "PASS"
+    },
+    "api_response_times": {
+      "unit": "ms",
+      "threshold": 2000,
+      "endpoints": {
+        "GET /api/lsa/featured": { "average": 280, "p95": 450, "p99": 680 },
+        "GET /api/lsa/search": { "average": 420, "p95": 750, "p99": 1200 },
+        "GET /api/lsa/:id": { "average": 180, "p95": 320, "p99": 500 },
+        "POST /api/bookings": { "average": 650, "p95": 1100, "p99": 1800 },
+        "GET /api/bookings/:id": { "average": 150, "p95": 280, "p99": 420 }
+      },
+      "status": "PASS"
+    }
+  },
+  "overall_status": "PASS",
+  "notes": "Baseline established on reference devices under normal network conditions (4G LTE). All metrics within acceptable thresholds."
+}

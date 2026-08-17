@@ -1,0 +1,284 @@
+# ─────────────────────────────────────────────────────────────────────
+# CI Pipeline — HabotConnect Parent-LSA App
+# ─────────────────────────────────────────────────────────────────────
+#
+# This is the main CI pipeline that runs on every push and pull request.
+# It enforces code quality, runs all test suites, and checks accessibility.
+#
+# Stages:
+#   1. Lint & Type Check (ESLint + TypeScript)
+#   2. Unit Tests (Jest)
+#   3. Integration Tests (Jest + React Native Testing Library)
+#   4. E2E Tests (Detox — iOS & Android)
+#   5. Build Verification
+#
+# ─────────────────────────────────────────────────────────────────────
+
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop, 'feature/*', 'release/*']
+  pull_request:
+    branches: [main, develop]
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '18'
+  JAVA_VERSION: '17'
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════
+  # Stage 1: Lint & Type Check
+  # ═══════════════════════════════════════════════════════════════════
+
+  lint:
+    name: 🔍 Lint & Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint (includes a11y rules)
+        run: npm run lint
+
+      - name: Run Prettier check
+        run: npm run format:check
+
+      - name: Run TypeScript type check
+        run: npm run type-check
+
+      - name: Check commit messages (commitlint)
+        if: github.event_name == 'pull_request'
+        run: |
+          npx commitlint --from ${{ github.event.pull_request.base.sha }} \
+                          --to ${{ github.event.pull_request.head.sha }}
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Stage 2: Unit Tests
+  # ═══════════════════════════════════════════════════════════════════
+
+  unit-tests:
+    name: 🧪 Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests with coverage
+        run: npm run test:unit -- --coverage --coverageReporters=text --coverageReporters=lcov
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+
+      - name: Check coverage threshold
+        run: |
+          npm run test:unit -- --coverage --coverageThreshold='{"global":{"branches":80,"functions":80,"lines":80,"statements":80}}'
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Stage 3: Integration Tests
+  # ═══════════════════════════════════════════════════════════════════
+
+  integration-tests:
+    name: 🔗 Integration Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Stage 4: E2E Tests (iOS)
+  # ═══════════════════════════════════════════════════════════════════
+
+  e2e-ios:
+    name: 📱 E2E Tests (iOS)
+    runs-on: macos-14
+    needs: [unit-tests, integration-tests]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install CocoaPods
+        run: |
+          cd ios && pod install
+
+      - name: Build for Detox (iOS)
+        run: npx detox build --configuration ios.sim.release
+
+      - name: Run Detox E2E tests (iOS)
+        run: npx detox test --configuration ios.sim.release --cleanup
+
+      - name: Upload E2E artifacts (screenshots/videos)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-ios-artifacts
+          path: .artifacts/
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Stage 5: E2E Tests (Android)
+  # ═══════════════════════════════════════════════════════════════════
+
+  e2e-android:
+    name: 🤖 E2E Tests (Android)
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Android Emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: 'Pixel 7'
+          script: |
+            npx detox build --configuration android.emu.release
+            npx detox test --configuration android.emu.release --cleanup
+
+      - name: Upload E2E artifacts (screenshots/videos)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-android-artifacts
+          path: .artifacts/
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Stage 6: Build Verification
+  # ═══════════════════════════════════════════════════════════════════
+
+  build-verify:
+    name: 🏗️ Build Verification
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build JavaScript bundle
+        run: |
+          npx react-native bundle \
+            --platform android \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle
+
+      - name: Check bundle size
+        run: |
+          BUNDLE_SIZE=$(wc -c < android/app/src/main/assets/index.android.bundle)
+          MAX_SIZE=8388608  # 8 MB
+          echo "Bundle size: $BUNDLE_SIZE bytes"
+          if [ "$BUNDLE_SIZE" -gt "$MAX_SIZE" ]; then
+            echo "❌ Bundle size exceeds 8 MB limit!"
+            exit 1
+          fi
+          echo "✅ Bundle size is within limits."
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Summary
+  # ═══════════════════════════════════════════════════════════════════
+
+  ci-summary:
+    name: ✅ CI Summary
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests, integration-tests, e2e-ios, e2e-android, build-verify]
+    if: always()
+
+    steps:
+      - name: CI Pipeline Summary
+        run: |
+          echo "═══════════════════════════════════════════════════"
+          echo "  CI Pipeline Results"
+          echo "═══════════════════════════════════════════════════"
+          echo "  Lint & Type Check:    ${{ needs.lint.result }}"
+          echo "  Unit Tests:           ${{ needs.unit-tests.result }}"
+          echo "  Integration Tests:    ${{ needs.integration-tests.result }}"
+          echo "  E2E Tests (iOS):      ${{ needs.e2e-ios.result }}"
+          echo "  E2E Tests (Android):  ${{ needs.e2e-android.result }}"
+          echo "  Build Verification:   ${{ needs.build-verify.result }}"
+          echo "═══════════════════════════════════════════════════"

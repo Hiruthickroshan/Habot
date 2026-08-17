@@ -1,0 +1,214 @@
+# ─────────────────────────────────────────────────────────────────────
+# Release Pipeline — HabotConnect Parent-LSA App
+# ─────────────────────────────────────────────────────────────────────
+#
+# Automated release pipeline using Fastlane.
+# Deploys to TestFlight (iOS) and Play Store Internal Track (Android).
+#
+# Triggered manually or on release tags.
+#
+# ─────────────────────────────────────────────────────────────────────
+
+name: Release Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Trigger on version tags (e.g., v1.0.0)
+
+  # Manual trigger for hotfixes
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Target platform'
+        required: true
+        type: choice
+        options:
+          - both
+          - ios
+          - android
+      lane:
+        description: 'Fastlane lane'
+        required: true
+        type: choice
+        options:
+          - beta
+          - release
+
+env:
+  NODE_VERSION: '18'
+  RUBY_VERSION: '3.2'
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════
+  # Pre-release Checks
+  # ═══════════════════════════════════════════════════════════════════
+
+  pre-release:
+    name: 🔒 Pre-release Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run all tests
+        run: |
+          npm run lint
+          npm run type-check
+          npm run test:unit
+          npm run test:integration
+
+      - name: Verify bundle size
+        run: |
+          mkdir -p android/app/src/main/assets
+          npx react-native bundle \
+            --platform android \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle
+          
+          BUNDLE_SIZE=$(wc -c < android/app/src/main/assets/index.android.bundle)
+          if [ "$BUNDLE_SIZE" -gt 8388608 ]; then
+            echo "❌ Bundle size exceeds 8 MB!"
+            exit 1
+          fi
+          echo "✅ Bundle size OK"
+
+  # ═══════════════════════════════════════════════════════════════════
+  # iOS Release (Fastlane → TestFlight)
+  # ═══════════════════════════════════════════════════════════════════
+
+  release-ios:
+    name: 🍎 iOS Release
+    runs-on: macos-14
+    needs: pre-release
+    if: >
+      github.event.inputs.platform != 'android'
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Setup Ruby (for Fastlane)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd ios && pod install
+          gem install fastlane
+
+      - name: Setup code signing
+        env:
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_PRIVATE_KEY: ${{ secrets.MATCH_GIT_PRIVATE_KEY }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.ASC_KEY }}
+        run: |
+          cd ios && fastlane match appstore --readonly
+
+      - name: Build and upload to TestFlight
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.ASC_KEY }}
+        run: |
+          cd ios && fastlane beta
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Android Release (Fastlane → Play Store Internal)
+  # ═══════════════════════════════════════════════════════════════════
+
+  release-android:
+    name: 🤖 Android Release
+    runs-on: ubuntu-latest
+    needs: pre-release
+    if: >
+      github.event.inputs.platform != 'ios'
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Ruby (for Fastlane)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          gem install fastlane
+
+      - name: Setup signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release.keystore
+
+      - name: Build and upload to Play Store
+        env:
+          GOOGLE_PLAY_JSON_KEY: ${{ secrets.GOOGLE_PLAY_JSON_KEY }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cd android && fastlane beta
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Release Notification
+  # ═══════════════════════════════════════════════════════════════════
+
+  notify:
+    name: 📢 Release Notification
+    runs-on: ubuntu-latest
+    needs: [release-ios, release-android]
+    if: always()
+
+    steps:
+      - name: Generate release summary
+        run: |
+          echo "═══════════════════════════════════════════════════"
+          echo "  Release Pipeline Summary"
+          echo "═══════════════════════════════════════════════════"
+          echo ""
+          echo "  Tag/Version: ${{ github.ref_name }}"
+          echo "  iOS Release:     ${{ needs.release-ios.result }}"
+          echo "  Android Release: ${{ needs.release-android.result }}"
+          echo ""

@@ -1,0 +1,222 @@
+# ─────────────────────────────────────────────────────────────────────
+# Performance Check Workflow — HabotConnect Parent-LSA App
+# ─────────────────────────────────────────────────────────────────────
+#
+# Validates performance metrics against defined thresholds.
+# Blocks releases that exceed performance budgets.
+#
+# ─────────────────────────────────────────────────────────────────────
+
+name: Performance Check
+
+on:
+  pull_request:
+    branches: [main, release/*]
+  push:
+    branches: [main]
+
+  # Manual trigger for ad-hoc performance checks
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18'
+  BUNDLE_SIZE_LIMIT: 8388608  # 8 MB in bytes
+  STARTUP_THRESHOLD_MS: 3000
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════
+  # Bundle Size Check
+  # ═══════════════════════════════════════════════════════════════════
+
+  bundle-size:
+    name: 📦 Bundle Size Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build JavaScript bundle (Android)
+        run: |
+          mkdir -p android/app/src/main/assets
+          npx react-native bundle \
+            --platform android \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res/
+
+      - name: Check bundle size
+        id: bundle-check
+        run: |
+          BUNDLE_FILE="android/app/src/main/assets/index.android.bundle"
+          BUNDLE_SIZE=$(wc -c < "$BUNDLE_FILE")
+          BUNDLE_SIZE_MB=$(echo "scale=2; $BUNDLE_SIZE / 1048576" | bc)
+
+          echo "bundle_size=$BUNDLE_SIZE" >> $GITHUB_OUTPUT
+          echo "bundle_size_mb=$BUNDLE_SIZE_MB" >> $GITHUB_OUTPUT
+
+          echo "═══════════════════════════════════════════════════"
+          echo "  Bundle Size Analysis"
+          echo "═══════════════════════════════════════════════════"
+          echo ""
+          echo "  JS Bundle:    ${BUNDLE_SIZE_MB} MB"
+          echo "  Limit:        $(echo "scale=2; ${{ env.BUNDLE_SIZE_LIMIT }} / 1048576" | bc) MB"
+          echo ""
+
+          if [ "$BUNDLE_SIZE" -gt "${{ env.BUNDLE_SIZE_LIMIT }}" ]; then
+            echo "❌ FAIL — Bundle size exceeds limit!"
+            exit 1
+          else
+            echo "✅ PASS — Bundle size within limits."
+          fi
+
+      - name: Comment bundle size on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `## 📦 Bundle Size Report
+            
+            | Metric | Value | Limit | Status |
+            |--------|-------|-------|--------|
+            | JS Bundle | ${{ steps.bundle-check.outputs.bundle_size_mb }} MB | 8 MB | ${{ steps.bundle-check.outputs.bundle_size < env.BUNDLE_SIZE_LIMIT && '✅' || '❌' }} |
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Startup Performance (Android Emulator)
+  # ═══════════════════════════════════════════════════════════════════
+
+  startup-perf:
+    name: 🚀 Startup Performance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Android APK
+        run: |
+          cd android && ./gradlew assembleRelease
+
+      - name: Run startup measurement
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: 'Pixel 7'
+          script: |
+            bash performance/scripts/measure-startup.sh
+
+      - name: Upload performance logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: startup-metrics
+          path: performance/logs/
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Memory Leak Detection
+  # ═══════════════════════════════════════════════════════════════════
+
+  memory-check:
+    name: 🧠 Memory Leak Detection
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Android APK
+        run: |
+          cd android && ./gradlew assembleRelease
+
+      - name: Run memory leak detector
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: 'Pixel 7'
+          script: |
+            # Install and launch app
+            adb install android/app/build/outputs/apk/release/app-release.apk
+            adb shell am start -n com.habotconnect.app/.MainActivity
+            sleep 5
+            # Run memory leak detector
+            node performance/scripts/memory-leak-detector.js
+
+      - name: Upload memory logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-metrics
+          path: performance/logs/
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Performance Summary
+  # ═══════════════════════════════════════════════════════════════════
+
+  perf-summary:
+    name: 📊 Performance Summary
+    runs-on: ubuntu-latest
+    needs: [bundle-size, startup-perf, memory-check]
+    if: always()
+
+    steps:
+      - name: Generate performance summary
+        run: |
+          echo "═══════════════════════════════════════════════════"
+          echo "  Performance Check Summary"
+          echo "═══════════════════════════════════════════════════"
+          echo ""
+          echo "  Bundle Size:        ${{ needs.bundle-size.result }}"
+          echo "  Startup Performance: ${{ needs.startup-perf.result }}"
+          echo "  Memory Leak Check:   ${{ needs.memory-check.result }}"
+          echo ""

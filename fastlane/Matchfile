@@ -1,0 +1,26 @@
+# Matchfile — HabotConnect
+# Configuration for Fastlane Match (code signing management).
+#
+# Match stores certificates and provisioning profiles in a Git repo,
+# ensuring all team members and CI use the same signing identities.
+
+# ── Git Repository for Certificates ─────────────────────────────────
+git_url("https://github.com/habotconnect/certificates.git")  # Replace with your certs repo
+
+# ── Storage Mode ─────────────────────────────────────────────────────
+storage_mode("git")
+
+# ── App Identifier ───────────────────────────────────────────────────
+app_identifier(["com.habotconnect.app"])
+
+# ── Signing Type ─────────────────────────────────────────────────────
+type("appstore")  # Options: development, adhoc, appstore, enterprise
+
+# ── Username ─────────────────────────────────────────────────────────
+username("developer@habotconnect.com")  # Replace with your Apple ID
+
+# ── Read Only in CI ──────────────────────────────────────────────────
+readonly(true)
+
+# ── Team ─────────────────────────────────────────────────────────────
+team_id("ABCDE12345")  # Replace with your Apple Developer Team ID
